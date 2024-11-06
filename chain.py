@@ -14,7 +14,7 @@ from langchain.vectorstores.base import VectorStoreRetriever
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables.base import Runnable
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.document_loaders import S3DirectoryLoader
+from langchain_community.document_loaders import LakeFSLoader
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -31,16 +31,23 @@ SYSTEM_PROMPT = (
 )
 
 
-def download_documents(bucket: str, prefix: str, output_path: Path):
+def download_documents(repo: str, ref: str, prefix: str, output_path: Path):
     """
     Download documents from remote storage to local FS
     """
     output_path.mkdir(parents=True, exist_ok=True)
-    loader = S3DirectoryLoader(bucket=bucket, prefix=prefix)
+    loader = LakeFSLoader(
+        lakefs_access_key=os.environ.get('LAKEFS_ACCESS_KEY_ID'),
+        lakefs_secret_key=os.environ.get('LAKEFS_SECRET_KEY'),
+        lakefs_endpoint=os.environ.get('LAKEFS_ENDPOINT_URL'),
+    )
+    loader.set_repo(repo)
+    loader.set_ref(ref)
+    loader.set_path(prefix)
     docs = loader.load()
     # save
     for doc in docs:
-        name = Path(doc.metadata.get('source')).name
+        name = Path(doc.metadata.get('path')).name
         with Path(output_path / (name + '.json')).open('w', encoding='utf-8') as out:
             out.write(doc.json())
 
@@ -98,15 +105,17 @@ def cli():
 
 
 @cli.command('extract')
-@click.option('--input-bucket', default='oz-repo')
-@click.option('--input-path', default='pg-books')
+@click.option('--input-repository', default='peter-pan-data')
+@click.option('--input-ref', default='main')
+@click.option('--input-path', default='data/books/')
 @click.option('--output-path', default='books', type=click.Path(path_type=Path, resolve_path=True))
-def cli_extract(input_bucket: str, input_path: str, output_path: Path):
+def cli_extract(input_repository: str, input_ref: str, input_path: str, output_path: Path):
     """
     Extract books from remote storage and store locally as langchain Documents
     """
     download_documents(
-        bucket=input_bucket,
+        repo=input_repository,
+        ref=input_ref,
         prefix=input_path,
         output_path=output_path,
     )
